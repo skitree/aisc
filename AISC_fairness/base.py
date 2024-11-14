@@ -100,7 +100,7 @@ def equalized_loss(predictions, labels, group_labels, device="cuda", alpha=0.1):
     fpr_diff = torch.abs(fpr_0 - fpr_1)
     
     # Total Equalized Odds loss: difference in TPR and FPR between groups
-    equalized_odds_loss = tpr_diff + fpr_diff
+    equalized_odds_loss = alpha * (tpr_diff + fpr_diff)
     
     return equalized_odds_loss
 
