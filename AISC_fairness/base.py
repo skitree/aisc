@@ -1,26 +1,30 @@
 """
-Re-used functions for AISC fairness experiments. Includes fairness functions for demographic parity
-and equalized odds. 
+Re-used functions for AISC fairness experiments. Includes fairness functions. Fairness function params are 
+(predictions, labels, group_labels, device="cuda", alpha=0.1)
 """
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
+from torchvision import datasets, transforms, models
+import re
+import os
+import shutil
+import numpy as np
+from tqdm import tqdm
 
 def validate_and_save_predictions(model, fairness, val_loader, criterion, file_info=None):
     """
     Validate the model and save predictions to a file, accounting for fairness loss.
-    
-    Args:
-        model: The trained model.
-        val_loader: DataLoader for validation data.
-        criterion: The primary classification loss (e.g., CrossEntropyLoss).
-        fairness: The type of fairness constraint (e.g., "parity", "equalized").
-    
-    Returns:
-        The average validation loss, the predictions, the true labels, and the fairness loss.
+
     """
     model.eval()  # Set model to evaluation mode
     running_val_loss = 0.0
     running_fairness_loss = 0.0  # Track fairness loss
     all_preds = []
     all_labels = []
+    
+    device = "cuda"
     
     with torch.no_grad():  # Disable gradient calculation for validation
         for images, labels, species, place in val_loader:
@@ -66,14 +70,6 @@ def equalized_loss(predictions, labels, group_labels, device="cuda", alpha=0.1):
     Computes the Equalized Odds loss to ensure that the predictions
     are conditionally independent of group_labels given the true labels.
     
-    Args:
-        predictions (torch.Tensor): Model predictions (probabilities or logits).
-        labels (torch.Tensor): True labels (binary classification: 0 or 1).
-        group_labels (torch.Tensor): Sensitive attribute labels (e.g., 0 for land, 1 for water).
-        alpha (float): Weight of the fairness penalty in the loss.
-    
-    Returns:
-        torch.Tensor: The Equalized Odds loss.
     """
     
     # Move tensors to the correct device
@@ -109,10 +105,11 @@ def equalized_loss(predictions, labels, group_labels, device="cuda", alpha=0.1):
     return equalized_odds_loss
 
 
-"""
-Demographic parity (group_labels is background / place; either water or land)
-"""
+
 def parity_loss(predictions, labels, group_labels, alpha=0.1):
+    """
+    Demographic parity (group_labels is background / place; either water or land)
+    """
     # Group labels can be the background type: 0 for land, 1 for water
     group_0_mask = (group_labels == 0)
     group_1_mask = (group_labels == 1)
@@ -124,3 +121,117 @@ def parity_loss(predictions, labels, group_labels, alpha=0.1):
     parity_loss = torch.abs(avg_group_0 - avg_group_1)
     
     return alpha * parity_loss
+
+
+
+def affirmative_action_modified_loss(predictions, labels, group_labels, device="cuda", alpha=0.1):
+    """
+    Computes a custom Affirmative Action loss to encourage TPR of at least 0.95 for group A=1 
+    and at least 0.9 for group A=0.
+
+    """
+    
+    # Move tensors to the correct device
+    predictions = predictions.to(device)
+    labels = labels.to(device)
+    group_labels = group_labels.to(device)
+    
+    # Separate groups
+    group_0_mask = (group_labels == 0)
+    group_1_mask = (group_labels == 1)
+    
+    # Calculate TPR for each group
+    # True positives for group 0 and group 1 (where labels == 1)
+    tpr_0_mask = group_0_mask & (labels == 1)
+    tpr_1_mask = group_1_mask & (labels == 1)
+    
+    # Total actual positives in each group
+    actual_positives_0 = tpr_0_mask.sum().float()
+    actual_positives_1 = tpr_1_mask.sum().float()
+    
+    # Calculate TPR for each group
+    tpr_0 = predictions[tpr_0_mask].mean() if actual_positives_0 > 0 else torch.tensor(0.0, device=device)
+    tpr_1 = predictions[tpr_1_mask].mean() if actual_positives_1 > 0 else torch.tensor(0.0, device=device)
+    
+    # Calculate the penalty for each group based on the target thresholds
+    penalty_0 = torch.pow(torch.minimum(torch.tensor(0.0, device=device), 0.9 - tpr_0), 2)
+    penalty_1 = torch.pow(torch.minimum(torch.tensor(0.0, device=device), 0.95 - tpr_1), 2)
+    
+    # Total Affirmative Action loss
+    affirmative_action_loss = alpha * (penalty_1 - penalty_0)
+    
+    return affirmative_action_loss
+
+
+def equalized_tpr_loss(predictions, labels, group_labels, device="cuda", alpha=0.1):
+    """
+    Computes the Equalized TPR loss to minimize the squared difference in TPR between
+    two groups specified by group_labels.
+    """
+    
+    # Move tensors to the correct device
+    predictions = predictions.to(device)
+    labels = labels.to(device)
+    group_labels = group_labels.to(device)
+    
+    # Separate groups
+    group_0_mask = (group_labels == 0)
+    group_1_mask = (group_labels == 1)
+    
+    # Calculate True Positive Rate (TPR) for each group
+    # True positives for group 0 and group 1 (where labels == 1)
+    tpr_0_mask = group_0_mask & (labels == 1)
+    tpr_1_mask = group_1_mask & (labels == 1)
+    
+    # Total actual positives in each group
+    actual_positives_0 = group_0_mask & (labels == 1)
+    actual_positives_1 = group_1_mask & (labels == 1)
+    
+    # Avoid division by zero by setting TPR to zero if no positives are present in a group
+    tpr_0 = predictions[tpr_0_mask].sum() / actual_positives_0.sum().float() if actual_positives_0.sum() > 0 else torch.tensor(0.0, device=device)
+    tpr_1 = predictions[tpr_1_mask].sum() / actual_positives_1.sum().float() if actual_positives_1.sum() > 0 else torch.tensor(0.0, device=device)
+    
+    # Calculate the squared difference in TPRs
+    tpr_diff_squared = torch.pow(tpr_1 - tpr_0, 2)
+    
+    # Total Equalized TPR loss
+    equalized_tpr_loss = alpha * tpr_diff_squared
+    
+    return equalized_tpr_loss
+
+def equalized_fpr_loss(predictions, labels, group_labels, alpha=0.1, device="cuda"):
+    """
+    Computes the Equalized FPR loss to minimize the squared difference in FPR between
+    two groups specified by group_labels.
+    """
+    
+    # Move tensors to the correct device
+    predictions = predictions.to(device)
+    labels = labels.to(device)
+    group_labels = group_labels.to(device)
+    
+    # Separate groups
+    group_0_mask = (group_labels == 0)
+    group_1_mask = (group_labels == 1)
+    
+    # Calculate False Positive Rate (FPR) for each group
+    # False positives for group 0 and group 1 (where labels == 0)
+    fpr_0_mask = group_0_mask & (labels == 0)
+    fpr_1_mask = group_1_mask & (labels == 0)
+    
+    # Total actual negatives in each group
+    actual_negatives_0 = group_0_mask & (labels == 0)
+    actual_negatives_1 = group_1_mask & (labels == 0)
+    
+    # Avoid division by zero by setting FPR to zero if no negatives are present in a group
+    fpr_0 = predictions[fpr_0_mask].mean() if actual_negatives_0.sum() > 0 else torch.tensor(0.0, device=device)
+    fpr_1 = predictions[fpr_1_mask].mean() if actual_negatives_1.sum() > 0 else torch.tensor(0.0, device=device)
+    
+    # Calculate the squared difference in FPRs
+    fpr_diff_squared = torch.pow(fpr_1 - fpr_0, 2)
+    
+    # Total Equalized FPR loss
+    equalized_fpr_loss = alpha * fpr_diff_squared
+    
+    return equalized_fpr_loss
+
