@@ -21,6 +21,40 @@ When specified, `pairing_distributions` will up or downsample based on desired d
 
 `updating_target` and `shuffle_split` are helper functions for data processing.
 
+
+Unless pairing_distribution is specified, the data distributions across splits look roughly as follows (this is an example print out):
+
+Class-Background Pairing Distribution (as % of total) for Split 0:
+| place |              0              |              1              |
+|-------|-----------------------------|-----------------------------|
+| y     |                             |                             |
+| 0     | 4006 (52.28%)               | 1902 (24.82%)               |
+| 1     | 548 (7.15%)                 | 1206 (15.74%)               |
+
+Class-Background Pairing Distribution (as % of total) for Split 1:
+| place |              0              |              1              |
+|-------|-----------------------------|-----------------------------|
+| y     |                             |                             |
+| 0     | 959 (54.24%)                | 431 (24.38%)                |
+| 1     | 116 (6.56%)                 | 262 (14.82%)                |
+
+
+Class-Background Pairing Distribution (as % of total) for Split 2:
+| place |              0              |              1              |
+|-------|-----------------------------|-----------------------------|
+| y     |                             |                             |
+| 0     | 634 (53.82%)                | 290 (24.62%)                |
+| 1     | 81 (6.88%)                  | 173 (14.69%)                |
+
+Class-Background Pairing Distribution (as % of total) for Split 3:
+| place |              0              |              1              |
+|-------|-----------------------------|-----------------------------|
+| y     |                             |                             |
+| 0     | 621 (52.63%)                | 282 (23.90%)                |
+| 1     | 86 (7.29%)                  | 191 (16.19%)                |
+
+> Note that these are the proportions used in the initial batch of experiments.
+
 ## Base.py
 This file contains the following fairness loss functions:
 `equalized_loss`,
