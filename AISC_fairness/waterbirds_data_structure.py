@@ -24,62 +24,59 @@ class WaterbirdsDataset(Dataset):
         if split is not None:
             self.metadata = metadata[metadata['split'] == split]
         elif split_ratios is not None:
-            self.metadata = self.shuffle_split(self.metadata, split_ratios, seed, pairing_distribution)
-
-            if split_ratios is not None:
-                #we are splitting the data ourself
-                # Ensure that the sum of the split ratios is 1.0
-                assert sum(split_ratios) == 1.0, "Split ratios must sum to 1.0"
-
-                # Shuffle and assign new splits
-
-
-                if self.preload:
-                    self.preloaded_images = []
-                    self.labels = []
-                    self.bird_names = []
-                    self.places = []
-
-                    print("Preloading data...")
-                    for idx in tqdm(range(len(self.metadata))):
-                        # Load and process each image
-                        row = self.metadata.iloc[idx]
-                        img_filename = row["img_filename"]
-                        label = row["y"]
-                        place = row["place"]
-
-                        img_path = os.path.join(self.images_dir, img_filename)
-                        try:
-                            image = Image.open(img_path).convert('RGB')
-                        except Exception as e:
-                            print(f"Error loading {img_filename}: {e}")
-                            continue  # Skip this image
-
-                        # Apply transformations if any
-                        if self.transform:
-                            image = self.transform(image)
-                        else:
-                            image = transforms.ToTensor()(image)
-
-                        # Ensure the image is a tensor
-                        if not isinstance(image, torch.Tensor):
-                            image = transforms.ToTensor()(image)
-
-                        # Move image to the specified device
-                        image = image.to(self.device)
-
-                        # Extract bird species from the filename
-                        pattern = r"\d+\.(.*?)/"
-                        match = re.search(pattern, img_filename)
-                        bird_name = match.group(1) if match else "Unknown"
-
-                        # Store preloaded data
-                        self.preloaded_images.append(image)
-                        self.labels.append(label)
-                        self.bird_names.append(bird_name)
-                        self.places.append(place)
+            #we are splitting the data ourself
+            assert sum(split_ratios) == 1.0, "Split ratios must sum to 1.0"
+            
+            # Shuffle and assign new splits
+            if pairing_distribution is not None:
+                self.metadata = self.shuffle_split(self.metadata, split_ratios, seed, pairing_distribution)
             else:
-                pass
+                self.metadata = self.shuffle_split(self.metadata, split_ratios, seed)
+
+            if self.preload:
+                self.preloaded_images = []
+                self.labels = []
+                self.bird_names = []
+                self.places = []
+
+                print("Preloading data...")
+                for idx in tqdm(range(len(self.metadata))):
+                    # Load and process each image
+                    row = self.metadata.iloc[idx]
+                    img_filename = row["img_filename"]
+                    label = row["y"]
+                    place = row["place"]
+
+                    img_path = os.path.join(self.images_dir, img_filename)
+                    try:
+                        image = Image.open(img_path).convert('RGB')
+                    except Exception as e:
+                        print(f"Error loading {img_filename}: {e}")
+                        continue  # Skip this image
+
+                    # Apply transformations if any
+                    if self.transform:
+                        image = self.transform(image)
+                    else:
+                        image = transforms.ToTensor()(image)
+
+                    # Ensure the image is a tensor
+                    if not isinstance(image, torch.Tensor):
+                        image = transforms.ToTensor()(image)
+
+                    # Move image to the specified device
+                    image = image.to(self.device)
+
+                    # Extract bird species from the filename
+                    pattern = r"\d+\.(.*?)/"
+                    match = re.search(pattern, img_filename)
+                    bird_name = match.group(1) if match else "Unknown"
+
+                    # Store preloaded data
+                    self.preloaded_images.append(image)
+                    self.labels.append(label)
+                    self.bird_names.append(bird_name)
+                    self.places.append(place)
 
     def __len__(self):
         if self.preload:
@@ -175,7 +172,7 @@ class WaterbirdsDataset(Dataset):
         if seed is not None:
             np.random.seed(seed)
 
-        if pairing_distribution:
+        if pairing_distribution is not None:
         # Initial split into hold-out (15%) and main set (85%) for upsampling skewed datasets 
             hold_out_size = int(0.15 * len(metadata))
             hold_out = metadata.sample(n=hold_out_size, random_state=seed)
@@ -190,7 +187,7 @@ class WaterbirdsDataset(Dataset):
 
             total_pairs = pairing_counts.sum()
             current_composition = (pairing_counts / total_pairs).to_numpy()
-            print("Current composition:\n", current_composition)
+#             print("Current composition:\n", current_composition)
             
             # Compute target counts based on pairing_distribution
             target_counts = self.updating_target(total_pairs, pairing_distribution, pairing_counts) 
@@ -209,7 +206,7 @@ class WaterbirdsDataset(Dataset):
                     if target > current_count:
                         # Attempt to upsample from hold-out
                         num_samples_needed = target - current_count
-                        print(f"needed for {y,place}", num_samples_needed)
+#                         print(f"needed for {y,place}", num_samples_needed)
 
                         if len(hold_out_group_data) >= num_samples_needed:
                             additional_data = hold_out_group_data.sample(n=num_samples_needed, random_state=seed, replace=False)
@@ -220,14 +217,14 @@ class WaterbirdsDataset(Dataset):
 #                             print("enough samples for update")
                         else:
                             # Not enough samples in hold-out, adjust the target for this pairing
-                            print(f"Not enough data in hold-out for {(y, place)}. Adjusting target count.")
+#                             print(f"Not enough data in hold-out for {(y, place)}. Adjusting target count.")
                             num_samples_added = len(hold_out_group_data)
                             group_data = pd.concat([group_data, hold_out_group_data])
 
                             #update target
                             temp_target_total = len(group_data) / pairing_distribution[f"{y},{place}"]
                             target_counts = self.updating_target(temp_target_total, pairing_distribution, pairing_counts)
-                            print(f"new target total counts", target_counts)
+#                             print(f"new target total counts", target_counts)
                             adjustments_made = True
 
                     elif target < current_count:
