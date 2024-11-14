@@ -37,16 +37,24 @@ def validate_and_save_predictions(model, fairness, val_loader, criterion, file_i
             # Compute primary validation loss
             loss = criterion(outputs, labels)
             running_val_loss += loss.item()
-
-            # Compute fairness loss if a fairness constraint is provided
+        
+           # Compute fairness loss if a fairness constraint is provided
+            group_labels = place
             if fairness == "parity":
-                group_labels = place  # Example of using place as the sensitive attribute
                 fair_loss = parity_loss(outputs, labels, group_labels)
                 running_fairness_loss += fair_loss.item()
             elif fairness == "equalized":
-                group_labels = place
                 fair_loss = equalized_loss(outputs, labels, group_labels)
-                running_fairness_loss += fair_loss.item()
+                running_fairness_loss += fair_loss.item()   
+            elif fairness =="equalized_fpr":
+                fair_loss = equalized_fpr_loss(outputs, labels, group_labels, device, alpha)
+                running_fairness_loss += fair_loss.item() 
+            elif fairness == "equalized_tpr":
+                fair_loss = equalized_tpr_loss(outputs, labels, group_labels, device, alpha)
+                running_fairness_loss += fair_loss.item() 
+            elif fairness == "affirmative_action":
+                fair_loss = affirmative_action_modified_loss(outputs, labels, group_labels, device, alpha)
+                running_fairness_loss += fair_loss.item() 
             
             # Collect predictions and true labels
             all_preds.extend(preds.cpu().numpy())
